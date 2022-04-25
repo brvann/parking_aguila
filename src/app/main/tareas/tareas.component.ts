@@ -1,9 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, ElementRef, OnInit, ViewChild } from '@angular/core';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
-
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { VehiculosService } from '../vehiculo/services/vehiculos.service';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import { Vehiculo } from '../vehiculo/models/vehiculo';
+import { TareasService } from './services/tareas.service';
+import { Estancia } from '../home/models/estancia';
 
 @Component({
   selector: 'app-tareas',
@@ -11,28 +13,27 @@ import { VehiculosService } from '../vehiculo/services/vehiculos.service';
   styleUrls: ['./tareas.component.scss']
 })
 export class TareasComponent implements OnInit {
-  public contentHeader: object
+  public tableHeaders:any = [['#', 'Núm. placa', 'Tiempo estacionado (min.)', 'Cantidad a pagar']]
+  public contentHeader: object;
   public form:FormGroup;
   public submitted:boolean = false;
 
-  public estancias:Array<any> = [
-    {
-      placa: 'Privado',
-      tiempo_total: 1,
-      saldo_vencido: 18.05
-    }
-  ];
+  public vehiculos:Array<Vehiculo> = [];
   
   public loading:boolean = false;
+  public actionLoading:boolean = false;
 
   constructor(
     private _formBuilder:FormBuilder,
-    private _vehiculosService:VehiculosService) { }
+    private _tareasService:TareasService,
+    private _vehiculosService:VehiculosService
+  ) { }
 
   ngOnInit(): void {
+    this.loadVehiculos();
 
     this.form = this._formBuilder.group({
-      filename:["",Validators.required]
+      filename:["", Validators.required]
     });
 
     this.contentHeader = {
@@ -57,48 +58,75 @@ export class TareasComponent implements OnInit {
     if(this.form.invalid) return;
     this.loading = true;
 
+    this.downloadPDF(this.form.controls.filename.value, this.vehiculos);
+  }
+  
+  get f():any{
+    return this.form.controls;
+  }
+
+  private loadVehiculos(): void {
     this._vehiculosService.getVehiculos().subscribe({
-      next:(data)=>{
-        this.estancias = data;
-        this.downloadPDF(this.form.get('filename').value);
-        this.loading = false;
+      next:(result: Array<Vehiculo>)=>{
+        this.vehiculos = result;
+        console.log(result);
       },
       error:err=>{
         console.log(err);
       }
     })
-
-    
   }
 
-  get f():any{
-    return this.form.controls;
+  public comienzaMes(): void {
+    this.actionLoading = true;
+
+    this._tareasService.postComienzaMes().subscribe({
+      next: result => {
+        console.log(result);
+        this._vehiculosService.postComienzaMes().subscribe({
+          next: result => {
+            console.log(result);
+            this.actionLoading = false;
+            this.loadVehiculos();
+          },
+          error: err => {
+            console.log(err);
+            this.actionLoading = false;
+          }
+        });
+      },
+      error: err => {
+        console.log(err);
+        this.actionLoading = false;
+      }
+    });
   }
+  
+  downloadPDF(filename:string, data:Array<Vehiculo>) {
+    const doc = new jsPDF('p', 'pt', 'a4');
+    var formatedData:Array<Array<string>> = [];
+    data.forEach((item, index) => {
+      let temp = [];
+      temp.push(index + '');
+      temp.push(item.placa);
+      temp.push(item.tiempo_total);
+      temp.push(`$ ${item.saldo_vencido}`);
+      formatedData.push(temp);
+    });
 
-  downloadPDF(filename:string) {
-    // Extraemos el
-    const DATA = document.getElementById('htmlData');
-    console.log(DATA)
-    // const doc = new jsPDF('p', 'pt', 'a4');
-    // const options = {
-    //   background: 'white',
-    //   scale: 3
-    // };
 
-    // html2canvas(DATA, options).then((canvas) => {
-    //   const img = canvas.toDataURL('image/PNG');
+    doc.autoTable({
+      head: this.tableHeaders,
+      body: formatedData,
+      theme: 'plain'
+    });
 
-    //   // Add image Canvas to PDF
-    //   const bufferX = 15;
-    //   const bufferY = 15;
-    //   const imgProps = (doc as any).getImageProperties(img);
-    //   const pdfWidth = doc.internal.pageSize.getWidth() - 2 * bufferX;
-    //   const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-    //   doc.addImage(img, 'PNG', bufferX, bufferY, pdfWidth, pdfHeight, undefined, 'FAST');
-    //   return doc;
-    // }).then((docResult) => {
-    //   docResult.save(filename + ".pdf");
-    // });
-}
+    // below line for Open PDF document in new tab
+    doc.output('dataurlnewwindow')
 
+    // below line for Download PDF document  
+    doc.save(`${filename}.pdf`);
+
+    this.loading = false;
+  }
 }
